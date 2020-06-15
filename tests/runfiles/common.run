@@ -894,3 +894,7 @@ tests = ['log_spacemap_import_logs']
 pre =
 post =
 tags = ['functional', 'log_spacemap']
+
+[tests/functional/zpool_influxdb]
+tests = 'zpool_influxdb'
+tags = ['functional', 'metrics']

@@ -81,6 +81,7 @@ SUBDIRS = \
 	vdev_zaps \
 	write_dirs \
 	xattr \
+	zpool_influxdb \
 	zvol
 
 if BUILD_LINUX
