@@ -29,7 +29,6 @@
 #include <sys/txg.h>
 #include <sys/vdev_impl.h>
 #include <sys/vdev_trim.h>
-#include <sys/refcount.h>
 #include <sys/metaslab_impl.h>
 #include <sys/dsl_synctask.h>
 #include <sys/zap.h>
@@ -1412,6 +1411,8 @@ vdev_autotrim_thread(void *arg)
 	vd->vdev_autotrim_thread = NULL;
 	cv_broadcast(&vd->vdev_autotrim_cv);
 	mutex_exit(&vd->vdev_autotrim_lock);
+
+	thread_exit();
 }
 
 /*

@@ -30,11 +30,12 @@
  * Copyright 2017 Nexenta Systems, Inc.
  * Copyright (c) 2017 Open-E, Inc. All Rights Reserved.
  * Copyright (c) 2018, loli10K <ezomori.nozomu@gmail.com>. All rights reserved.
+ * Copyright (c) 2019, Klara Inc.
+ * Copyright (c) 2019, Allan Jude
  */
 
 /* Portions Copyright 2010 Robert Milkowski */
 
-#include <sys/zfeature.h>
 #include <sys/cred.h>
 #include <sys/zfs_context.h>
 #include <sys/dmu_objset.h>
@@ -193,8 +194,10 @@ compression_changed_cb(void *arg, uint64_t newval)
 	 */
 	ASSERT(newval != ZIO_COMPRESS_INHERIT);
 
-	os->os_compress = zio_compress_select(os->os_spa, newval,
-	    ZIO_COMPRESS_ON);
+	os->os_compress = zio_compress_select(os->os_spa,
+	    ZIO_COMPRESS_ALGO(newval), ZIO_COMPRESS_ON);
+	os->os_complevel = zio_complevel_select(os->os_spa, os->os_compress,
+	    ZIO_COMPRESS_LEVEL(newval), ZIO_COMPLEVEL_DEFAULT);
 }
 
 static void
@@ -392,7 +395,7 @@ dnode_hash(const objset_t *os, uint64_t obj)
 	return (crc);
 }
 
-unsigned int
+static unsigned int
 dnode_multilist_index_func(multilist_t *ml, void *obj)
 {
 	dnode_t *dn = obj;
@@ -581,6 +584,7 @@ dmu_objset_open_impl(spa_t *spa, dsl_dataset_t *ds, blkptr_t *bp,
 		/* It's the meta-objset. */
 		os->os_checksum = ZIO_CHECKSUM_FLETCHER_4;
 		os->os_compress = ZIO_COMPRESS_ON;
+		os->os_complevel = ZIO_COMPLEVEL_DEFAULT;
 		os->os_encrypted = B_FALSE;
 		os->os_copies = spa_max_replication(spa);
 		os->os_dedup_checksum = ZIO_CHECKSUM_OFF;
@@ -1096,6 +1100,7 @@ dmu_objset_create_impl(spa_t *spa, dsl_dataset_t *ds, blkptr_t *bp,
 typedef struct dmu_objset_create_arg {
 	const char *doca_name;
 	cred_t *doca_cred;
+	proc_t *doca_proc;
 	void (*doca_userfunc)(objset_t *os, void *arg,
 	    cred_t *cr, dmu_tx_t *tx);
 	void *doca_userarg;
@@ -1140,7 +1145,7 @@ dmu_objset_create_check(void *arg, dmu_tx_t *tx)
 	}
 
 	error = dsl_fs_ss_limit_check(pdd, 1, ZFS_PROP_FILESYSTEM_LIMIT, NULL,
-	    doca->doca_cred);
+	    doca->doca_cred, doca->doca_proc);
 	if (error != 0) {
 		dsl_dir_rele(pdd, FTAG);
 		return (error);
@@ -1268,6 +1273,7 @@ dmu_objset_create(const char *name, dmu_objset_type_t type, uint64_t flags,
 
 	doca.doca_name = name;
 	doca.doca_cred = CRED();
+	doca.doca_proc = curproc;
 	doca.doca_flags = flags;
 	doca.doca_userfunc = func;
 	doca.doca_userarg = arg;
@@ -1296,6 +1302,7 @@ typedef struct dmu_objset_clone_arg {
 	const char *doca_clone;
 	const char *doca_origin;
 	cred_t *doca_cred;
+	proc_t *doca_proc;
 } dmu_objset_clone_arg_t;
 
 /*ARGSUSED*/
@@ -1324,7 +1331,7 @@ dmu_objset_clone_check(void *arg, dmu_tx_t *tx)
 	}
 
 	error = dsl_fs_ss_limit_check(pdd, 1, ZFS_PROP_FILESYSTEM_LIMIT, NULL,
-	    doca->doca_cred);
+	    doca->doca_cred, doca->doca_proc);
 	if (error != 0) {
 		dsl_dir_rele(pdd, FTAG);
 		return (SET_ERROR(EDQUOT));
@@ -1383,6 +1390,7 @@ dmu_objset_clone(const char *clone, const char *origin)
 	doca.doca_clone = clone;
 	doca.doca_origin = origin;
 	doca.doca_cred = CRED();
+	doca.doca_proc = curproc;
 
 	int rv = dsl_sync_task(clone,
 	    dmu_objset_clone_check, dmu_objset_clone_sync, &doca,

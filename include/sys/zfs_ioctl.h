@@ -105,7 +105,7 @@ typedef enum drr_headertype {
 #define	DMU_BACKUP_FEATURE_COMPRESSED		(1 << 22)
 #define	DMU_BACKUP_FEATURE_LARGE_DNODE		(1 << 23)
 #define	DMU_BACKUP_FEATURE_RAW			(1 << 24)
-/* flag #25 is reserved for the ZSTD compression feature */
+#define	DMU_BACKUP_FEATURE_ZSTD			(1 << 25)
 #define	DMU_BACKUP_FEATURE_HOLDS		(1 << 26)
 /*
  * The SWITCH_TO_LARGE_BLOCKS feature indicates that we can receive
@@ -132,7 +132,8 @@ typedef enum drr_headertype {
     DMU_BACKUP_FEATURE_RESUMING | DMU_BACKUP_FEATURE_LARGE_BLOCKS | \
     DMU_BACKUP_FEATURE_COMPRESSED | DMU_BACKUP_FEATURE_LARGE_DNODE | \
     DMU_BACKUP_FEATURE_RAW | DMU_BACKUP_FEATURE_HOLDS | \
-    DMU_BACKUP_FEATURE_REDACTED | DMU_BACKUP_FEATURE_SWITCH_TO_LARGE_BLOCKS)
+    DMU_BACKUP_FEATURE_REDACTED | DMU_BACKUP_FEATURE_SWITCH_TO_LARGE_BLOCKS | \
+    DMU_BACKUP_FEATURE_ZSTD)
 
 /* Are all features in the given flag word currently supported? */
 #define	DMU_STREAM_SUPPORTED(x)	(!((x) & ~DMU_BACKUP_FEATURE_MASK))
@@ -224,6 +225,19 @@ typedef enum dmu_send_resume_token_version {
 /*
  * zfs ioctl command structure
  */
+
+/* Header is used in C++ so can't forward declare untagged struct */
+struct drr_begin {
+	uint64_t drr_magic;
+	uint64_t drr_versioninfo; /* was drr_version */
+	uint64_t drr_creation_time;
+	dmu_objset_type_t drr_type;
+	uint32_t drr_flags;
+	uint64_t drr_toguid;
+	uint64_t drr_fromguid;
+	char drr_toname[MAXNAMELEN];
+};
+
 typedef struct dmu_replay_record {
 	enum {
 		DRR_BEGIN, DRR_OBJECT, DRR_FREEOBJECTS,
@@ -233,16 +247,7 @@ typedef struct dmu_replay_record {
 	} drr_type;
 	uint32_t drr_payloadlen;
 	union {
-		struct drr_begin {
-			uint64_t drr_magic;
-			uint64_t drr_versioninfo; /* was drr_version */
-			uint64_t drr_creation_time;
-			dmu_objset_type_t drr_type;
-			uint32_t drr_flags;
-			uint64_t drr_toguid;
-			uint64_t drr_fromguid;
-			char drr_toname[MAXNAMELEN];
-		} drr_begin;
+		struct drr_begin drr_begin;
 		struct drr_end {
 			zio_cksum_t drr_checksum;
 			uint64_t drr_toguid;

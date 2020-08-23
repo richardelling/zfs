@@ -25,6 +25,8 @@
  * Copyright (c) 2014, Joyent, Inc. All rights reserved.
  * Copyright 2014 HybridCluster. All rights reserved.
  * Copyright (c) 2018, loli10K <ezomori.nozomu@gmail.com>. All rights reserved.
+ * Copyright (c) 2019, Klara Inc.
+ * Copyright (c) 2019, Allan Jude
  */
 
 #include <sys/dmu.h>
@@ -126,6 +128,7 @@ typedef struct dmu_recv_begin_arg {
 	const char *drba_origin;
 	dmu_recv_cookie_t *drba_cookie;
 	cred_t *drba_cred;
+	proc_t *drba_proc;
 	dsl_crypto_params_t *drba_dcp;
 } dmu_recv_begin_arg_t;
 
@@ -398,7 +401,7 @@ recv_begin_check_existing_impl(dmu_recv_begin_arg_t *drba, dsl_dataset_t *ds,
 	 * against that limit.
 	 */
 	error = dsl_fs_ss_limit_check(ds->ds_dir, 1, ZFS_PROP_SNAPSHOT_LIMIT,
-	    NULL, drba->drba_cred);
+	    NULL, drba->drba_cred, drba->drba_proc);
 	if (error != 0)
 		return (error);
 
@@ -528,13 +531,17 @@ recv_begin_check_feature_flags_impl(uint64_t featureflags, spa_t *spa)
 		return (SET_ERROR(ENOTSUP));
 
 	/*
-	 * LZ4 compressed, embedded, mooched, large blocks, and large_dnodes
-	 * in the stream can only be used if those pool features are enabled
-	 * because we don't attempt to decompress / un-embed / un-mooch /
-	 * split up the blocks / dnodes during the receive process.
+	 * LZ4 compressed, ZSTD compressed, embedded, mooched, large blocks,
+	 * and large_dnodes in the stream can only be used if those pool
+	 * features are enabled because we don't attempt to decompress /
+	 * un-embed / un-mooch / split up the blocks / dnodes during the
+	 * receive process.
 	 */
 	if ((featureflags & DMU_BACKUP_FEATURE_LZ4) &&
 	    !spa_feature_is_enabled(spa, SPA_FEATURE_LZ4_COMPRESS))
+		return (SET_ERROR(ENOTSUP));
+	if ((featureflags & DMU_BACKUP_FEATURE_ZSTD) &&
+	    !spa_feature_is_enabled(spa, SPA_FEATURE_ZSTD_COMPRESS))
 		return (SET_ERROR(ENOTSUP));
 	if ((featureflags & DMU_BACKUP_FEATURE_EMBED_DATA) &&
 	    !spa_feature_is_enabled(spa, SPA_FEATURE_EMBEDDED_DATA))
@@ -679,14 +686,16 @@ dmu_recv_begin_check(void *arg, dmu_tx_t *tx)
 		 * filesystems and increment those counts during begin_sync).
 		 */
 		error = dsl_fs_ss_limit_check(ds->ds_dir, 1,
-		    ZFS_PROP_FILESYSTEM_LIMIT, NULL, drba->drba_cred);
+		    ZFS_PROP_FILESYSTEM_LIMIT, NULL,
+		    drba->drba_cred, drba->drba_proc);
 		if (error != 0) {
 			dsl_dataset_rele(ds, FTAG);
 			return (error);
 		}
 
 		error = dsl_fs_ss_limit_check(ds->ds_dir, 1,
-		    ZFS_PROP_SNAPSHOT_LIMIT, NULL, drba->drba_cred);
+		    ZFS_PROP_SNAPSHOT_LIMIT, NULL,
+		    drba->drba_cred, drba->drba_proc);
 		if (error != 0) {
 			dsl_dataset_rele(ds, FTAG);
 			return (error);
@@ -1152,6 +1161,7 @@ dmu_recv_begin(char *tofs, char *tosnap, dmu_replay_record_t *drr_begin,
 	drc->drc_force = force;
 	drc->drc_resumable = resumable;
 	drc->drc_cred = CRED();
+	drc->drc_proc = curproc;
 	drc->drc_clone = (origin != NULL);
 
 	if (drc->drc_drrb->drr_magic == BSWAP_64(DMU_BACKUP_MAGIC)) {
@@ -1199,6 +1209,7 @@ dmu_recv_begin(char *tofs, char *tosnap, dmu_replay_record_t *drr_begin,
 	drba.drba_origin = origin;
 	drba.drba_cookie = drc;
 	drba.drba_cred = CRED();
+	drba.drba_proc = curproc;
 
 	if (drc->drc_featureflags & DMU_BACKUP_FEATURE_RESUMING) {
 		err = dsl_sync_task(tofs,
@@ -2452,7 +2463,7 @@ receive_read_record(dmu_recv_cookie_t *drc)
 			    drrw->drr_object, byteorder, drrw->drr_salt,
 			    drrw->drr_iv, drrw->drr_mac, drrw->drr_type,
 			    drrw->drr_compressed_size, drrw->drr_logical_size,
-			    drrw->drr_compressiontype);
+			    drrw->drr_compressiontype, 0);
 		} else if (DRR_WRITE_COMPRESSED(drrw)) {
 			ASSERT3U(drrw->drr_compressed_size, >, 0);
 			ASSERT3U(drrw->drr_logical_size, >=,
@@ -2461,7 +2472,7 @@ receive_read_record(dmu_recv_cookie_t *drc)
 			abuf = arc_loan_compressed_buf(
 			    dmu_objset_spa(drc->drc_os),
 			    drrw->drr_compressed_size, drrw->drr_logical_size,
-			    drrw->drr_compressiontype);
+			    drrw->drr_compressiontype, 0);
 		} else {
 			abuf = arc_loan_buf(dmu_objset_spa(drc->drc_os),
 			    is_meta, drrw->drr_logical_size);
@@ -2536,7 +2547,7 @@ receive_read_record(dmu_recv_cookie_t *drc)
 			    drrs->drr_object, byteorder, drrs->drr_salt,
 			    drrs->drr_iv, drrs->drr_mac, drrs->drr_type,
 			    drrs->drr_compressed_size, drrs->drr_length,
-			    drrs->drr_compressiontype);
+			    drrs->drr_compressiontype, 0);
 		} else {
 			abuf = arc_loan_buf(dmu_objset_spa(drc->drc_os),
 			    DMU_OT_IS_METADATA(drrs->drr_type),
@@ -3133,7 +3144,8 @@ dmu_recv_end_check(void *arg, dmu_tx_t *tx)
 			return (error);
 		}
 		error = dsl_dataset_snapshot_check_impl(origin_head,
-		    drc->drc_tosnap, tx, B_TRUE, 1, drc->drc_cred);
+		    drc->drc_tosnap, tx, B_TRUE, 1,
+		    drc->drc_cred, drc->drc_proc);
 		dsl_dataset_rele(origin_head, FTAG);
 		if (error != 0)
 			return (error);
@@ -3141,7 +3153,8 @@ dmu_recv_end_check(void *arg, dmu_tx_t *tx)
 		error = dsl_destroy_head_check_impl(drc->drc_ds, 1);
 	} else {
 		error = dsl_dataset_snapshot_check_impl(drc->drc_ds,
-		    drc->drc_tosnap, tx, B_TRUE, 1, drc->drc_cred);
+		    drc->drc_tosnap, tx, B_TRUE, 1,
+		    drc->drc_cred, drc->drc_proc);
 	}
 	return (error);
 }

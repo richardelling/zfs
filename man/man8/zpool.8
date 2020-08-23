@@ -29,7 +29,7 @@
 .\"
 .Dd August 9, 2019
 .Dt ZPOOL 8
-.Os Linux
+.Os
 .Sh NAME
 .Nm zpool
 .Nd configure ZFS storage pools
@@ -469,6 +469,12 @@ option in
 The maximum time in milliseconds that
 .Nm zpool import
 will wait for an expected device to be available.
+.El
+.Bl -tag -width "ZPOOL_STATUS_NON_NATIVE_ASHIFT_IGNORE"
+.It Ev ZPOOL_STATUS_NON_NATIVE_ASHIFT_IGNORE
+If set, suppress warning about non-native vdev ashift in
+.Nm zpool status .
+The value is not used, only the presence or absence of the variable matters.
 .El
 .Bl -tag -width "ZPOOL_VDEV_NAME_GUID"
 .It Ev ZPOOL_VDEV_NAME_GUID
