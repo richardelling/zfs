@@ -3,7 +3,8 @@ include $(top_srcdir)/config/Rules.am
 bin_PROGRAMS = zpool_influxdb
 
 zpool_influxdb_SOURCES = \
-	zpool_influxdb.c 
+	zpool_influxdb.c \
+	zpool_influxdb.h
 
 zpool_influxdb_LDADD = \
 	$(top_builddir)/lib/libspl/libspl.la \
